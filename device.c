@@ -3,9 +3,13 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 #include <linux/hdreg.h> /* for HDIO_GETGEO */
 #include <linux/cdrom.h> /* for CDROM_GET_CAPABILITY */
+#include <linux/fs.h>
 #include "device.h"
 
+
+static struct block_device* lower;
 #ifdef CONFIG_SBLKDEV_REQUESTS_BASED
+
 
 static inline int process_request(struct request *rq, unsigned int *nr_bytes)
 {
@@ -14,19 +18,22 @@ static inline int process_request(struct request *rq, unsigned int *nr_bytes)
 	struct req_iterator iter;
 	struct sblkdev_device *dev = rq->q->queuedata;
 	loff_t pos = blk_rq_pos(rq) << SECTOR_SHIFT;
-	loff_t dev_size = (dev->capacity << SECTOR_SHIFT);
+	//loff_t dev_size = (dev->capacity << SECTOR_SHIFT);
 
 	rq_for_each_segment(bvec, rq, iter) {
 		unsigned long len = bvec.bv_len;
 		void *buf = page_address(bvec.bv_page) + bvec.bv_offset;
-
 		if ((pos + len) > dev_size)
 			len = (unsigned long)(dev_size - pos);
-
 		if (rq_data_dir(rq))
-			memcpy(dev->data + pos, buf, len); /* WRITE */
+		{
+			kprintf("dummy");
+			//trace_block_rq_remap(rq, lower, blk_rq_pos(rq));
+			//memcpy(dev->data + pos, buf, len); /* WRITE */
+		}
 		else
-			memcpy(buf, dev->data + pos, len); /* READ */
+			kprintf("dummy");
+			//memcpy(buf, dev->data + pos, len); /* READ */
 
 		pos += len;
 		*nr_bytes += len;
@@ -64,28 +71,42 @@ static struct blk_mq_ops mq_ops = {
 
 static inline void process_bio(struct sblkdev_device *dev, struct bio *bio)
 {
+
+	//unsigned long start_time = bio_start_io_acct(bio);
+
+	//trace_block_bio_remap(bio, lower, bio->bi_iter.bi_sector);
+
+	//bio_end_io_acct(bio, start_time);
+	//bio_endio(bio);
 	struct bio_vec bvec;
 	struct bvec_iter iter;
 	loff_t pos = bio->bi_iter.bi_sector << SECTOR_SHIFT;
 	loff_t dev_size = (dev->capacity << SECTOR_SHIFT);
 	unsigned long start_time;
 
+	struct bio * bio_cloned;
 	start_time = bio_start_io_acct(bio);
 	bio_for_each_segment(bvec, bio, iter) {
 		unsigned int len = bvec.bv_len;
-		void *buf = page_address(bvec.bv_page) + bvec.bv_offset;
+		//void *buf = page_address(bvec.bv_page) + bvec.bv_offset;
 
 		if ((pos + len) > dev_size) {
 			/* len = (unsigned long)(dev_size - pos);*/
 			bio->bi_status = BLK_STS_IOERR;
 			break;
 		}
+		
+		bio_cloned = bio_clone_fast(bio, GFP_KERNEL, &fs_bio_set);
+		printk("%p bio_cloned", bio_cloned);
+		//if (bio_data_dir(bio))
+		//	memcpy(dev->data + pos, buf, len); /* WRITE */
+		//else
+		//	memcpy(buf, dev->data + pos, len); /* READ */
 
-		if (bio_data_dir(bio))
-			memcpy(dev->data + pos, buf, len); /* WRITE */
-		else
-			memcpy(buf, dev->data + pos, len); /* READ */
+		bio_cloned->bi_bdev = lower; 
 
+		submit_bio(bio_cloned);
+		
 		pos += len;
 	}
 	bio_end_io_acct(bio, start_time);
@@ -237,7 +258,7 @@ void sblkdev_remove(struct sblkdev_device *dev)
 #ifdef CONFIG_SBLKDEV_REQUESTS_BASED
 	blk_mq_free_tag_set(&dev->tag_set);
 #endif
-	vfree(dev->data);
+	//vfree(dev->data);
 
 	kfree(dev);
 
@@ -307,7 +328,7 @@ static inline struct gendisk *blk_alloc_disk(int node)
 	return disk;
 }
 #endif
-
+static char *_sblkdev_claim_ptr = "I belong to sblkdev";
 /*
  * sblkdev_add() - Add simple block device
  */
@@ -318,7 +339,15 @@ struct sblkdev_device *sblkdev_add(int major, int minor, char *name,
 	int ret = 0;
 	struct gendisk *disk;
 
+	dev_t tmp;
+
+	lookup_bdev("/dev/sda4", &tmp);
+	printk("%p", tmp);
+	lower = blkdev_get_by_dev(tmp, FMODE_READ | FMODE_WRITE | FMODE_EXCL, 0xdeadbeef);
+	printk("%p", lower);
+	capacity = bdev_nr_sectors(lower);
 	pr_info("add device '%s' capacity %llu sectors\n", name, capacity);
+
 
 	dev = kzalloc(sizeof(struct sblkdev_device), GFP_KERNEL);
 	if (!dev) {
@@ -327,12 +356,13 @@ struct sblkdev_device *sblkdev_add(int major, int minor, char *name,
 	}
 
 	INIT_LIST_HEAD(&dev->link);
+	
 	dev->capacity = capacity;
-	dev->data = __vmalloc(capacity << SECTOR_SHIFT, GFP_NOIO | __GFP_ZERO);
-	if (!dev->data) {
-		ret = -ENOMEM;
-		goto fail_kfree;
-	}
+//	dev->data = __vmalloc(capacity << SECTOR_SHIFT, GFP_NOIO | __GFP_ZERO);
+//	if (!dev->data) {
+//		ret = -ENOMEM;
+//		goto fail_kfree;
+//	}
 
 #ifdef CONFIG_SBLKDEV_REQUESTS_BASED
 	ret = init_tag_set(&dev->tag_set, dev);
@@ -362,7 +392,6 @@ struct sblkdev_device *sblkdev_add(int major, int minor, char *name,
 	}
 #endif
 	dev->disk = disk;
-
 	/* only one partition */
 #ifdef GENHD_FL_NO_PART_SCAN
 	disk->flags |= GENHD_FL_NO_PART_SCAN;
@@ -430,7 +459,7 @@ fail_free_tag_set:
 	blk_mq_free_tag_set(&dev->tag_set);
 #endif
 fail_vfree:
-	vfree(dev->data);
+	//vfree(dev->data);
 fail_kfree:
 	kfree(dev);
 fail:

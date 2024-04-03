@@ -47,7 +47,7 @@
 
 static int sblkdev_major;
 static LIST_HEAD(sblkdev_device_list);
-static char *sblkdev_catalog = "sblkdev1,2048;sblkdev2,4096";
+static char *sblkdev_catalog = "sblkdev1,2048";
 
 /*
  * sblkdev_init() - Entry point 'init'.
