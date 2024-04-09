@@ -88,14 +88,19 @@ static inline void process_bio(struct sblkdev_device *dev, struct bio *bio)
 	//
 	struct bio * bio_cloned;
 	//	start_time = bio_start_io_acct(bio);
-	if (bio_op(bio) != REQ_OP_WRITE && bio_op(bio) != REQ_OP_WRITE_SAME)
+	printk("bio_op %d", bio_op(bio));
+//	if (bio_op(bio) != REQ_OP_WRITE)
+	if (true)
 	{
 		struct bvec_iter iter;
 		struct bio_vec bv;
 		printk("bio_alloc_bioset");
-		bio_cloned = bio_alloc_bioset(GFP_NOIO, bio_segments(bio), &fs_bio_set);
+		bio_cloned = bio_alloc_bioset(GFP_KERNEL, bio_segments(bio), &fs_bio_set);
 		printk("bi_bdev");
-		bio_cloned->bi_bdev = lower;
+//		bio_cloned->bi_bdev = lower;
+		bio_set_dev(bio_cloned, lower);
+		if (bio_flagged(bio, BIO_REMAPPED))
+			bio_set_flag(bio_cloned, BIO_REMAPPED);
 		printk("bio_opf");
 		bio_cloned->bi_opf = bio->bi_opf;
 
@@ -118,8 +123,8 @@ static inline void process_bio(struct sblkdev_device *dev, struct bio *bio)
 					bio_cloned->bi_io_vec[bio_cloned->bi_vcnt++] = bv;
 				break;
 		}
-		if ((bio_crypt_clone(bio_cloned, bio, GFP_NOIO) < 0) ||
-				(bio_integrity(bio) && bio_integrity_clone(bio_cloned, bio, GFP_NOIO)))
+		if ((bio_crypt_clone(bio_cloned, bio, GFP_KERNEL) < 0) ||
+				(bio_integrity(bio) && bio_integrity_clone(bio_cloned, bio, GFP_KERNEL) < 0))
 		{
 			printk("bio_put");
 			bio_put(bio_cloned);
@@ -128,7 +133,7 @@ static inline void process_bio(struct sblkdev_device *dev, struct bio *bio)
 		{
 			bio_clone_blkg_association(bio_cloned, bio);
 			blkcg_bio_issue_init(bio_cloned);
-			submit_bio(bio_cloned);
+			submit_bio_noacct(bio_cloned);
 		}
 
 	}
@@ -136,7 +141,8 @@ static inline void process_bio(struct sblkdev_device *dev, struct bio *bio)
 	{
 		printk("req_op_write");
 		bio_cloned = bio_clone_fast(bio, GFP_NOIO, &fs_bio_set);
-		bio_cloned->bi_bdev = lower;
+//		bio_cloned->bi_bdev = lower;
+		bio_set_dev(bio_cloned, lower);
 		submit_bio(bio_cloned);
 	}
 	printk("%p bio_cloned", bio_cloned);
@@ -380,7 +386,7 @@ struct sblkdev_device *sblkdev_add(int major, int minor, char *name,
 
 	lookup_bdev("/dev/sda4", &tmp);
 	printk("%p", tmp);
-	lower = blkdev_get_by_dev(tmp, FMODE_READ | FMODE_WRITE | FMODE_EXCL, 0xdeadbeef);
+	lower = blkdev_get_by_dev(tmp, FMODE_READ | FMODE_WRITE | FMODE_EXCL, _sblkdev_claim_ptr);
 	printk("%p", lower);
 	capacity = bdev_nr_sectors(lower);
 	//capacity = 2048;
