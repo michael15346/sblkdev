@@ -1,9 +1,11 @@
-// SPDX-License-Identifier: GPL-2.0
+
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 #include <linux/hdreg.h> /* for HDIO_GETGEO */
 #include <linux/cdrom.h> /* for CDROM_GET_CAPABILITY */
 #include <linux/fs.h>
+#include <linux/blk-cgroup.h>
+#include <linux/blk-crypto.h>
 #include "device.h"
 
 
@@ -72,43 +74,78 @@ static struct blk_mq_ops mq_ops = {
 static inline void process_bio(struct sblkdev_device *dev, struct bio *bio)
 {
 
-	//unsigned long start_time = bio_start_io_acct(bio);
+	unsigned long start_time = bio_start_io_acct(bio);
 
 	//trace_block_bio_remap(bio, lower, bio->bi_iter.bi_sector);
 
 	//bio_end_io_acct(bio, start_time);
 	//bio_endio(bio);
-	struct bio_vec bvec;
-	struct bvec_iter iter;
-	loff_t pos = bio->bi_iter.bi_sector << SECTOR_SHIFT;
-	loff_t dev_size = (dev->capacity << SECTOR_SHIFT);
-	unsigned long start_time;
-
+	//	struct bio_vec bvec;
+	//	struct bvec_iter iter;
+	//	loff_t pos = bio->bi_iter.bi_sector << SECTOR_SHIFT;
+	//	loff_t dev_size = (dev->capacity << SECTOR_SHIFT);
+	//	unsigned long start_time;
+	//
 	struct bio * bio_cloned;
-	start_time = bio_start_io_acct(bio);
-	bio_for_each_segment(bvec, bio, iter) {
-		unsigned int len = bvec.bv_len;
-		//void *buf = page_address(bvec.bv_page) + bvec.bv_offset;
+	//	start_time = bio_start_io_acct(bio);
+	if (bio_op(bio) != REQ_OP_WRITE && bio_op(bio) != REQ_OP_WRITE_SAME)
+	{
+		struct bvec_iter iter;
+		struct bio_vec bv;
+		printk("bio_alloc_bioset");
+		bio_cloned = bio_alloc_bioset(GFP_NOIO, bio_segments(bio), &fs_bio_set);
+		printk("bi_bdev");
+		bio_cloned->bi_bdev = lower;
+		printk("bio_opf");
+		bio_cloned->bi_opf = bio->bi_opf;
 
-		if ((pos + len) > dev_size) {
-			/* len = (unsigned long)(dev_size - pos);*/
-			bio->bi_status = BLK_STS_IOERR;
-			break;
+		bio_cloned->bi_ioprio = bio->bi_ioprio;
+		bio_cloned->bi_write_hint = bio->bi_write_hint;
+		bio_cloned->bi_iter.bi_sector = bio->bi_iter.bi_sector;
+		bio_cloned->bi_iter.bi_size = bio->bi_iter.bi_size;
+
+		switch (bio_op(bio_cloned))
+		{
+			case REQ_OP_DISCARD:
+			case REQ_OP_SECURE_ERASE:
+			case REQ_OP_WRITE_ZEROES:
+				break;
+			case REQ_OP_WRITE_SAME:
+				bio_cloned->bi_io_vec[bio_cloned->bi_vcnt++] = bio->bi_io_vec[0];
+				break;
+			default:
+				bio_for_each_segment(bv, bio, iter)
+					bio_cloned->bi_io_vec[bio_cloned->bi_vcnt++] = bv;
+				break;
 		}
-		
-		bio_cloned = bio_clone_fast(bio, GFP_KERNEL, &fs_bio_set);
-		printk("%p bio_cloned", bio_cloned);
-		//if (bio_data_dir(bio))
-		//	memcpy(dev->data + pos, buf, len); /* WRITE */
-		//else
-		//	memcpy(buf, dev->data + pos, len); /* READ */
+		if ((bio_crypt_clone(bio_cloned, bio, GFP_NOIO) < 0) ||
+				(bio_integrity(bio) && bio_integrity_clone(bio_cloned, bio, GFP_NOIO)))
+		{
+			printk("bio_put");
+			bio_put(bio_cloned);
+		}
+		else
+		{
+			bio_clone_blkg_association(bio_cloned, bio);
+			blkcg_bio_issue_init(bio_cloned);
+			submit_bio(bio_cloned);
+		}
 
-		bio_cloned->bi_bdev = lower; 
-
-		submit_bio(bio_cloned);
-		
-		pos += len;
 	}
+	else
+	{
+		printk("req_op_write");
+		bio_cloned = bio_clone_fast(bio, GFP_NOIO, &fs_bio_set);
+		bio_cloned->bi_bdev = lower;
+		submit_bio(bio_cloned);
+	}
+	printk("%p bio_cloned", bio_cloned);
+//	//if (bio_data_dir(bio))
+//	//	memcpy(dev->data + pos, buf, len); /* WRITE */
+//	//else
+//	//	memcpy(buf, dev->data + pos, len); /* READ */
+//
+	//bio_cloned->bi_bdev = lower; 
 	bio_end_io_acct(bio, start_time);
 	bio_endio(bio);
 }
@@ -346,10 +383,11 @@ struct sblkdev_device *sblkdev_add(int major, int minor, char *name,
 	lower = blkdev_get_by_dev(tmp, FMODE_READ | FMODE_WRITE | FMODE_EXCL, 0xdeadbeef);
 	printk("%p", lower);
 	capacity = bdev_nr_sectors(lower);
+	//capacity = 2048;
 	pr_info("add device '%s' capacity %llu sectors\n", name, capacity);
 
 
-	dev = kzalloc(sizeof(struct sblkdev_device), GFP_KERNEL);
+	dev = kzalloc(sizeof(struct sblkdev_device), GFP_NOIO);
 	if (!dev) {
 		ret = -ENOMEM;
 		goto fail;
@@ -464,6 +502,7 @@ fail_kfree:
 	kfree(dev);
 fail:
 	pr_err("Failed to add block device\n");
+
 
 	return ERR_PTR(ret);
 }
