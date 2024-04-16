@@ -5,5 +5,5 @@
 # file, and should be free from all branches of conditional compilation.
 include ${M}/Makefile-standalone
 
-sblkdev-y := main.o device.o
+sblkdev-y := device.o
 obj-$(CONFIG_SBLKDEV) += sblkdev.o
