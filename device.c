@@ -7,7 +7,6 @@
 #include <linux/bio.h>
 #include <linux/device-mapper.h>
 
-
 /* This is a structure which will store  information about the underlying device 
 *  Param:
 * dev : underlying device
@@ -53,7 +52,7 @@ static int basic_target_map(struct dm_target *ti, struct bio *bio)
 
         struct my_dm_target *mdt = (struct my_dm_target *) ti->private;
 
-        //printk(KERN_CRIT "\n<<in function basic_target_map \n");
+	//printk("\n<<in function basic_target_map \n");
 
 
 
@@ -66,7 +65,7 @@ static int basic_target_map(struct dm_target *ti, struct bio *bio)
 
 
 
-        //printk(KERN_CRIT "\n>>out function basic_target_map \n");       
+        //printk("\n>>out function basic_target_map \n");       
 
         return DM_MAPIO_SUBMITTED;
 
@@ -96,13 +95,13 @@ basic_target_ctr(struct dm_target *ti,unsigned int argc,char **argv)
 
 
 
-        //printk(KERN_CRIT "\n >>in function basic_target_ctr \n");
+        //printk("\n >>in function basic_target_ctr \n");
 
 
 
         if (argc != 2) {
 
-                //printk(KERN_CRIT "\n Invalid no.of arguments.\n");
+                //printk("\n Invalid no.of arguments.\n");
 
                 ti->error = "Invalid argument count";
 
@@ -120,7 +119,7 @@ basic_target_ctr(struct dm_target *ti,unsigned int argc,char **argv)
 
         {
 
-                //printk(KERN_CRIT "\n Mdt is null\n");
+                //printk("\n Mdt is null\n");
 
                 ti->error = "dm-basic_target: Cannot allocate linear context";
 
@@ -174,7 +173,7 @@ basic_target_ctr(struct dm_target *ti,unsigned int argc,char **argv)
 
 
 
-        //printk(KERN_CRIT "\n>>out function basic_target_ctr \n");                       
+        //printk("\n>>out function basic_target_ctr \n");                       
 
         return 0;
 
@@ -184,7 +183,7 @@ basic_target_ctr(struct dm_target *ti,unsigned int argc,char **argv)
 
         kfree(mdt);
 
-        //printk(KERN_CRIT "\n>>out function basic_target_ctr with errorrrrrrrrrr \n");           
+        //printk("\n>>out function basic_target_ctr with errorrrrrrrrrr \n");           
 
         return -EINVAL;
 
@@ -208,7 +207,7 @@ static void basic_target_dtr(struct dm_target *ti)
         struct my_dm_target *mdt = (struct my_dm_target *) ti->private;
 
 
-        //printk(KERN_CRIT "\n<<in function basic_target_dtr \n");        
+        //printk("\n<<in function basic_target_dtr \n");        
 
 
         dm_put_device(ti, mdt->dev);
@@ -216,13 +215,25 @@ static void basic_target_dtr(struct dm_target *ti)
 
         kfree(mdt);
 
-        //printk(KERN_CRIT "\n>>out function basic_target_dtr \n");               
+        //printk("\n>>out function basic_target_dtr \n");               
 
 }
 
 
 
-
+static int basic_target_message(struct dm_target *ti, unsigned argc, char **argv, char *result, unsigned maxlen)
+{
+	if ((argc == 1) && !strcmp(argv[0], "snapshot"))
+	{
+		printk("make snapshot");
+		return 0;
+	}
+	else 
+	{
+		printk("unrecognized message");
+		return -1;
+	}
+}
 
 
 /*
@@ -248,10 +259,11 @@ static struct target_type basic_target = {
 
         .map = basic_target_map,
 
+	.message = basic_target_message
+
 };
 
-        
-
+ 
 /*---------Module Functions -----------------*/
 
 
@@ -264,10 +276,29 @@ static int init_basic_target(void)
 
         result = dm_register_target(&basic_target);
 
+	int r = 0;
+	uint32_t cookie = 0;
+	uint16_t udev_flags = 0;
 
-//        if(result < 0)
 
-                //printk(KERN_CRIT "\n Error in registering target \n");
+//	dm_task_set_name(dmt, basic_target.name);
+
+//	dm_task_set_add_node(dmt, DEFAULT_DM_ADD_NODE);
+
+//	dm_task_run(dmt);
+
+        if(result < 0)
+	{
+                //printk("\n Error in registering target \n");
+	}
+
+	struct dm_ioctl *dmi;
+	unsigned command;
+	int check_udev;
+	int rely_on_udev;
+	int suspended_counter;
+	unsigned ioctl_retry = 1;
+	int retryable = 0;
 
 
         return 0;
