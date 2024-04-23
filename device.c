@@ -54,7 +54,20 @@ static int basic_target_map(struct dm_target *ti, struct bio *bio)
 
 	//printk("\n<<in function basic_target_map \n");
 
+	struct bio_vec bvec;
+	void *buf;
+	struct bio *bio_clone = bio_clone_fast(bio, GFP_NOIO, &fs_bio_set);
+	struct bvec_iter* iter = &(bio_clone->bi_iter);
+	while (iter->bi_size)
+	{
+		bvec = bio_iter_iovec(bio_clone, *iter);
+		buf = bvec_kmap_local(&bvec);
+		// do hash map stuff, bytes length (is) bvec.bv_len
+		//printk("accessed block size %d", bvec.bv_len);
+		kunmap_local(buf);
 
+		bio_advance_iter_single(bio_clone, iter, bvec.bv_len);
+	}
 
         bio->bi_bdev = mdt->dev->bdev;
 
