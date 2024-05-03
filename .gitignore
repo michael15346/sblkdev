@@ -1,0 +1,9 @@
+*.o
+*.cmd
+err
+*.order
+*.symvers
+*.ko
+*.mod*
+storage
+test

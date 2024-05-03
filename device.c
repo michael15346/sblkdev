@@ -7,6 +7,8 @@
 #include <linux/bio.h>
 #include <linux/device-mapper.h>
 
+#include "dedup.h"
+
 /* This is a structure which will store  information about the underlying device 
 *  Param:
 * dev : underlying device
@@ -22,11 +24,26 @@ struct my_dm_target {
 
 };
 
+struct crypto_shash * alg;
 
+//forced to use 32-bit hash (not even with custom hashfn can you use anything beefier than u32 for hash), and we're even limited to crc32c by the available ciphers. at least it's fast.
+struct hash2data_unit {
+	u32 crc32c;
+	bio_vec data; // the bio subsystem has some funny quirks in its memory handling. this may not work.
+};
 
+struct sect2hash_unit {
+	sector_t sector;
+	u32 crc32c;
+}
 
+struct rhashtable *ht_sect2hash, *ht_hash2data;
 
-
+const static struct hash2data_rht_params object_params = {
+	.key_len = sizeof(u32),
+	.key_offset = offsetof(struct hash2data_unit, crc32c),
+	.head_offset = offsetof(struct hash2data_unit, data)
+};
 /* This is map function of basic target. This function gets called whenever you get a new bio
  * request.The working of map function is to map a particular bio request to the underlying device. 
  *The request that we receive is submitted to out device so  bio->bi_bdev points to our device.
@@ -46,6 +63,8 @@ struct my_dm_target {
  *                                                to the map function  
  */
 
+static char md5_digest [32];
+
 static int basic_target_map(struct dm_target *ti, struct bio *bio)
 
 {
@@ -56,17 +75,21 @@ static int basic_target_map(struct dm_target *ti, struct bio *bio)
 
 	struct bio_vec bvec;
 	void *buf;
-	struct bio *bio_clone = bio_clone_fast(bio, GFP_NOIO, bio->bi_pool);
+/*	struct bio *bio_clone = bio_clone_fast(bio, GFP_NOIO, bio->bi_pool);
 	struct bvec_iter iter;
 	bio_for_each_segment(bvec, bio_clone, iter)
 	{
-
 		buf = bvec_kmap_local(&bvec);
 		// do hash map stuff, bytes length (is) bvec.bv_len
 		//printk("accessed block size %d", bvec.bv_len);
+		if (bio_data_dir(bio) == WRITE)
+		{
+			calc_hash(alg, buf, bvec.bv_len, md5_digest);
+			printk("hash %s", md5_digest);	
+		}
 		kunmap_local(buf);
 	}
-
+*/
         bio->bi_bdev = mdt->dev->bdev;
         submit_bio(bio);
         //printk("\n>>out function basic_target_map \n");       
@@ -224,19 +247,6 @@ static void basic_target_dtr(struct dm_target *ti)
 
 
 
-static int basic_target_message(struct dm_target *ti, unsigned argc, char **argv, char *result, unsigned maxlen)
-{
-	if ((argc == 1) && !strcmp(argv[0], "snapshot"))
-	{
-		printk("make snapshot");
-		return 0;
-	}
-	else 
-	{
-		printk("unrecognized message");
-		return -1;
-	}
-}
 
 
 /*
@@ -260,9 +270,8 @@ static struct target_type basic_target = {
 
         .dtr = basic_target_dtr,
 
-        .map = basic_target_map,
+        .map = basic_target_map
 
-	.message = basic_target_message
 
 };
 
@@ -304,6 +313,15 @@ static int init_basic_target(void)
 	int retryable = 0;
 
 
+/*	alg = crypto_alloc_shash("md5", 0,0);
+	if (IS_ERR(alg))
+	{
+		pr_info("can't alloc alg md5\n");
+		return PTR_ERR(alg);
+	}
+*/
+
+	
         return 0;
 
 }
@@ -315,16 +333,12 @@ static void cleanup_basic_target(void)
 
 {
 
+	
         dm_unregister_target(&basic_target);
 
+//	crypto_free_shash(alg);
 
 }
-
-
-
-
-
-
 
 module_init(init_basic_target);
 

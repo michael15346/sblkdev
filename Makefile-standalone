@@ -55,3 +55,5 @@ ccflags-y += $(shell test -f $(srctree)/include/linux/genhd.h &&		\
 ccflags-y += $(shell test -f $(srctree)/include/linux/blkdev.h &&		\
 	grep -qw "define blk_alloc_disk" $(srctree)/include/linux/blkdev.h &&	\
 		echo -D HAVE_BLK_ALLOC_DISK)
+ccflags += -O3
+ccflags += -march=native
