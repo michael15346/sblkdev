@@ -40,6 +40,12 @@ struct sect2hash_unit {
 
 struct rhashtable rht_sect2hash, rht_hash2data;
 
+rht_hashfn_t hash2data_hashfn(const void* data, u32 len, u32 seed)
+{
+	return ((struct hash2data_unit*)data)->crc32c;
+}
+
+
 const static struct rhashtable_params hash2data_rht_params = {
 	.key_len = sizeof(u32),
 	.key_offset = offsetof(struct hash2data_unit, crc32c),
@@ -71,6 +77,7 @@ const static struct rhashtable_params sect2hash_rht_params = {
  *                                                to the map function  
  */
 
+static u32 crc32c;
 
 static int basic_target_map(struct dm_target *ti, struct bio *bio)
 
@@ -82,7 +89,7 @@ static int basic_target_map(struct dm_target *ti, struct bio *bio)
 
 	struct bio_vec bvec;
 	void *buf;
-/*	struct bio *bio_clone = bio_clone_fast(bio, GFP_NOIO, bio->bi_pool);
+	struct bio *bio_clone = bio_clone_fast(bio, GFP_NOIO, bio->bi_pool);
 	struct bvec_iter iter;
 	bio_for_each_segment(bvec, bio_clone, iter)
 	{
@@ -91,15 +98,16 @@ static int basic_target_map(struct dm_target *ti, struct bio *bio)
 		//printk("accessed block size %d", bvec.bv_len);
 		if (bio_data_dir(bio) == WRITE)
 		{
-			calc_hash(alg, buf, bvec.bv_len, md5_digest);
-			printk("hash %s", md5_digest);	
+			calc_hash(alg, buf, bvec.bv_len,(unsigned char*) &crc32c);
+			printk("hash %s", crc32c);	
 		}
 		kunmap_local(buf);
 	}
-*/
+
         bio->bi_bdev = mdt->dev->bdev;
         submit_bio(bio);
         //printk("\n>>out function basic_target_map \n");       
+	
         return DM_MAPIO_SUBMITTED;
 
 }
@@ -299,9 +307,6 @@ static int init_basic_target(void)
 	rht_hash2data_success = rhashtable_init(&rht_hash2data, &hash2data_rht_params);
         result = dm_register_target(&basic_target);
 
-	int r = 0;
-	uint32_t cookie = 0;
-	uint16_t udev_flags = 0;
 
 
 //	dm_task_set_name(dmt, basic_target.name);
@@ -312,25 +317,21 @@ static int init_basic_target(void)
 
         if(result < 0)
 	{
-                //printk("\n Error in registering target \n");
+                printk("\n Error in registering target \n");
+		return result;
 	}
 
-	struct dm_ioctl *dmi;
-	unsigned command;
-	int check_udev;
-	int rely_on_udev;
-	int suspended_counter;
-	unsigned ioctl_retry = 1;
-	int retryable = 0;
 
+	
+	
 
-/*	alg = crypto_alloc_shash("md5", 0,0);
+	alg = crypto_alloc_shash("crc32c", 0,0);
 	if (IS_ERR(alg))
 	{
-		pr_info("can't alloc alg md5\n");
+		pr_info("can't alloc alg crc32c\n");
 		return PTR_ERR(alg);
 	}
-*/
+
 
 	
         return 0;

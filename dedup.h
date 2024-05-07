@@ -1,7 +1,9 @@
-#pragma once
+#ifndef DEDUP_H
+#define DEDUP_H
 #include <linux/rhashtable.h>
 #include <crypto/hash.h>
 
+//why is it here? haven't we moved all rht units to device.c already
 struct hashed_block {
 	struct rhash_head node;
 	//KEY - sector_t (sector location?) sector_t is int-like. can use list. will need to store all of the data. 
@@ -23,3 +25,4 @@ struct sdesc *init_sdesc(struct crypto_shash *alg);
 int calc_hash(struct crypto_shash *alg,
              const unsigned char *data, unsigned int datalen,
              unsigned char *digest);
+#endif
