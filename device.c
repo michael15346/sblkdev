@@ -4,6 +4,7 @@
 
 #include<linux/init.h>
 
+#include <linux/bvec.h>
 #include <linux/bio.h>
 #include <linux/device-mapper.h>
 
@@ -29,20 +30,27 @@ struct crypto_shash * alg;
 //forced to use 32-bit hash (not even with custom hashfn can you use anything beefier than u32 for hash), and we're even limited to crc32c by the available ciphers. at least it's fast.
 struct hash2data_unit {
 	u32 crc32c;
-	bio_vec data; // the bio subsystem has some funny quirks in its memory handling. this may not work.
+	struct bio_vec data; // the bio subsystem has some funny quirks in its memory handling. this may not work.
 };
 
 struct sect2hash_unit {
 	sector_t sector;
 	u32 crc32c;
-}
+};
 
-struct rhashtable *ht_sect2hash, *ht_hash2data;
+struct rhashtable rht_sect2hash, rht_hash2data;
 
-const static struct hash2data_rht_params object_params = {
+const static struct rhashtable_params hash2data_rht_params = {
 	.key_len = sizeof(u32),
 	.key_offset = offsetof(struct hash2data_unit, crc32c),
 	.head_offset = offsetof(struct hash2data_unit, data)
+};
+
+
+const static struct rhashtable_params sect2hash_rht_params = {
+	.key_len = sizeof(u32),
+	.key_offset = offsetof(struct sect2hash_unit, sector),
+	.head_offset = offsetof(struct sect2hash_unit, crc32c)
 };
 /* This is map function of basic target. This function gets called whenever you get a new bio
  * request.The working of map function is to map a particular bio request to the underlying device. 
@@ -63,7 +71,6 @@ const static struct hash2data_rht_params object_params = {
  *                                                to the map function  
  */
 
-static char md5_digest [32];
 
 static int basic_target_map(struct dm_target *ti, struct bio *bio)
 
@@ -286,6 +293,10 @@ static int init_basic_target(void)
 
         int result;
 
+	int rht_sect2hash_success, rht_hash2data_success;
+
+	rht_sect2hash_success = rhashtable_init(&rht_sect2hash, &sect2hash_rht_params);
+	rht_hash2data_success = rhashtable_init(&rht_hash2data, &hash2data_rht_params);
         result = dm_register_target(&basic_target);
 
 	int r = 0;
