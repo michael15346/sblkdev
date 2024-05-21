@@ -22,6 +22,7 @@
 
 DEFINE_MUTEX(rhashtable_lock);
 
+u32 default_crc32 = 20;
 struct my_dm_target {
 
         struct dm_dev *dev;
@@ -145,8 +146,19 @@ static int basic_target_map(struct dm_target *ti, struct bio *bio)
 		else if (bio_data_dir(bio) == READ)
 		{
 			struct sect2hash_unit *s2h_unit = rhashtable_lookup_fast(&rht_sect2hash, &iter.bi_sector, sect2hash_rht_params);
-			struct hash2data_unit *h2d_unit = rhashtable_lookup_fast(&rht_hash2data, &s2h_unit->crc32c, hash2data_rht_params);
-			iter.bi_sector = h2d_unit->actual_sector;
+			if (s2h_unit)
+			{
+				struct hash2data_unit *h2d_unit = rhashtable_lookup_fast(&rht_hash2data, &(s2h_unit->crc32c), hash2data_rht_params);
+				iter.bi_sector = h2d_unit->actual_sector;
+			}
+
+			// This needs to instead send the request to the special "null sector", created in advance.
+
+			/*else
+			{
+				struct hash2data_unit *h2d_unit = rhashtable_lookup_fast(&rht_hash2data, &default_crc32, hash2data_rht_params);
+				iter.bi_sector = h2d_unit->actual_sector;
+			}*/
 		}
 		//kunmap_local(buf);
 	}
@@ -376,7 +388,6 @@ static int init_basic_target(void)
         int result;
 
 	int rht_sect2hash_success, rht_hash2data_success;
-	printk("%f", 1/0);
 	rht_sect2hash_success = rhashtable_init(&rht_sect2hash, &sect2hash_rht_params);
 	rht_hash2data_success = rhashtable_init(&rht_hash2data, &hash2data_rht_params);
         result = dm_register_target(&basic_target);
